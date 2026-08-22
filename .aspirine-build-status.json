@@ -1,0 +1,18 @@
+{
+  "run_attempt": "1",
+  "run_id": "32553178045",
+  "source_commit": "60e87196e9bfe2811840a8699c380db1b40a901f",
+  "steps": {
+    "analyze": "skipped",
+    "artifact": "skipped",
+    "debugbuild": "skipped",
+    "extract": "failure",
+    "inspect": "skipped",
+    "project": "skipped",
+    "publish": "skipped",
+    "releasebuild": "skipped",
+    "toolchain": "skipped",
+    "validate": "skipped",
+    "xcodegen": "skipped"
+  }
+}
