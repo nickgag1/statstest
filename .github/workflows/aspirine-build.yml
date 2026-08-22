@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - 'Aspirine-Ultimate-2.2-RC-source.zip'
+      - '.aspirine-ci/overrides/**'
       - '.github/workflows/aspirine-build.yml'
 
 permissions:
@@ -20,12 +21,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract source
+      - name: Extract reviewed source and apply validated overrides
         run: |
           set -euxo pipefail
           rm -rf src
           mkdir src
           unzip -q Aspirine-Ultimate-2.2-RC-source.zip -d src
+          cp .aspirine-ci/overrides/SystemPlistAccess.swift src/Aspirine/Models/SystemPlistAccess.swift
+          cp .aspirine-ci/overrides/RecoveryPackage.swift src/Aspirine/Models/RecoveryPackage.swift
+          cp .aspirine-ci/overrides/RuntimeProbe.swift src/Aspirine/Models/RuntimeProbe.swift
+          test -s src/Aspirine/Models/SystemPlistAccess.swift
+          test -s src/Aspirine/Models/RecoveryPackage.swift
+          test -s src/Aspirine/Models/RuntimeProbe.swift
 
       - name: Select Xcode
         run: |
@@ -33,6 +40,7 @@ jobs:
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+          swiftc --version
 
       - name: Install XcodeGen
         run: |
@@ -45,7 +53,9 @@ jobs:
         run: |
           set -euxo pipefail
           python3 tools/validate_source.py | tee source-validation.txt
+          find Aspirine -name '*.swift' -type f -print0 | while IFS= read -r -d '' file; do swiftc -parse "$file"; done
           plutil -lint Aspirine/App/Info.plist
+          ruby -e 'require "yaml"; YAML.load_file("project.yml"); puts "project.yml: PASS"'
           bash -n build-unsigned.sh
 
       - name: Generate project
@@ -54,6 +64,7 @@ jobs:
           set -euxo pipefail
           xcodegen generate
           xcodebuild -project Aspirine.xcodeproj -scheme Aspirine -showBuildSettings > build-settings.txt
+          grep -E 'PRODUCT_BUNDLE_IDENTIFIER|IPHONEOS_DEPLOYMENT_TARGET|SWIFT_VERSION|TARGETED_DEVICE_FAMILY|MARKETING_VERSION|CURRENT_PROJECT_VERSION' build-settings.txt
 
       - name: Debug device compile
         working-directory: src
@@ -108,12 +119,18 @@ jobs:
           test -x "$APP/Aspirine"
           /usr/bin/file "$APP/Aspirine" | tee ipa-binary.txt
           lipo -info "$APP/Aspirine" | tee -a ipa-binary.txt
-          lipo -info "$APP/Aspirine" | grep -q 'arm64'
-          /usr/bin/strings "$APP/Aspirine" | grep -q '24A5390f'
-          /usr/bin/strings "$APP/Aspirine" | grep -q 'iPhone14,7'
-          /usr/bin/strings "$APP/Aspirine" | grep -q 'iPhone16,1'
+          lipo -info "$APP/Aspirine" | grep -F 'arm64'
+          xcrun otool -L "$APP/Aspirine" | tee ipa-linked-libraries.txt
+          /usr/bin/strings "$APP/Aspirine" > ipa-strings.txt
+          grep -Fq '24A5390f' ipa-strings.txt
+          grep -Fq 'iPhone14,7' ipa-strings.txt
+          grep -Fq 'iPhone16,1' ipa-strings.txt
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = 'app.aspirine.ultimate.db4'
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = '2.2.0'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = '220'
+          test "$(find ipa-inspect/Payload -maxdepth 1 -type d -name '*.app' | wc -l | tr -d ' ')" = '1'
+          test -z "$(find ipa-inspect -type f -name '*.mobileprovision' -print -quit)"
+          shasum -a 256 -c Aspirine-unsigned.ipa.sha256
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
