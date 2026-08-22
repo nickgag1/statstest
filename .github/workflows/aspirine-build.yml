@@ -1,0 +1,139 @@
+name: Build and publish Aspirine IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'Aspirine-Ultimate-2.2-RC-source.zip'
+      - '.github/workflows/aspirine-build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract source
+        run: |
+          set -euxo pipefail
+          rm -rf src
+          mkdir src
+          unzip -q Aspirine-Ultimate-2.2-RC-source.zip -d src
+
+      - name: Select Xcode
+        run: |
+          set -euxo pipefail
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install XcodeGen
+        run: |
+          set -euxo pipefail
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Validate source
+        working-directory: src
+        run: |
+          set -euxo pipefail
+          python3 tools/validate_source.py | tee source-validation.txt
+          plutil -lint Aspirine/App/Info.plist
+          bash -n build-unsigned.sh
+
+      - name: Generate project
+        working-directory: src
+        run: |
+          set -euxo pipefail
+          xcodegen generate
+          xcodebuild -project Aspirine.xcodeproj -scheme Aspirine -showBuildSettings > build-settings.txt
+
+      - name: Debug device compile
+        working-directory: src
+        run: |
+          set -euxo pipefail
+          xcodebuild \
+            -project Aspirine.xcodeproj \
+            -scheme Aspirine \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build | tee xcodebuild-debug.log
+
+      - name: Static analyzer
+        working-directory: src
+        run: |
+          set -euxo pipefail
+          xcodebuild \
+            -project Aspirine.xcodeproj \
+            -scheme Aspirine \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-analyze \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            analyze | tee xcodebuild-analyze.log
+
+      - name: Build unsigned IPA
+        working-directory: src
+        run: |
+          set -euxo pipefail
+          ./build-unsigned.sh | tee xcodebuild-release.log
+          test -s Aspirine-unsigned.ipa
+          shasum -a 256 Aspirine-unsigned.ipa | tee Aspirine-unsigned.ipa.sha256
+
+      - name: Inspect IPA
+        working-directory: src
+        run: |
+          set -euxo pipefail
+          rm -rf ipa-inspect
+          mkdir ipa-inspect
+          unzip -t Aspirine-unsigned.ipa | tee ipa-unzip-test.txt
+          unzip -q Aspirine-unsigned.ipa -d ipa-inspect
+          APP='ipa-inspect/Payload/Aspirine.app'
+          test -d "$APP"
+          test -x "$APP/Aspirine"
+          /usr/bin/file "$APP/Aspirine" | tee ipa-binary.txt
+          lipo -info "$APP/Aspirine" | tee -a ipa-binary.txt
+          lipo -info "$APP/Aspirine" | grep -q 'arm64'
+          /usr/bin/strings "$APP/Aspirine" | grep -q '24A5390f'
+          /usr/bin/strings "$APP/Aspirine" | grep -q 'iPhone14,7'
+          /usr/bin/strings "$APP/Aspirine" | grep -q 'iPhone16,1'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = 'app.aspirine.ultimate.db4'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = '2.2.0'
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aspirine-Ultimate-2.2-RC-unsigned
+          path: |
+            src/Aspirine-unsigned.ipa
+            src/Aspirine-unsigned.ipa.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          TAG='aspirine-2.2-rc'
+          TITLE='Aspirine Ultimate 2.2 RC'
+          NOTES='Unsigned arm64 IPA built and validated by GitHub Actions. Download Aspirine-unsigned.ipa and sign/install it with Sideloadly.'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" src/Aspirine-unsigned.ipa src/Aspirine-unsigned.ipa.sha256 --clobber
+          else
+            gh release create "$TAG" src/Aspirine-unsigned.ipa src/Aspirine-unsigned.ipa.sha256 --title "$TITLE" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
+          fi
