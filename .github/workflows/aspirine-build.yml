@@ -21,7 +21,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract reviewed source and apply validated overrides
+      - id: extract
+        name: Extract reviewed source and apply validated overrides
         run: |
           set -euxo pipefail
           rm -rf src
@@ -34,7 +35,8 @@ jobs:
           test -s src/Aspirine/Models/RecoveryPackage.swift
           test -s src/Aspirine/Models/RuntimeProbe.swift
 
-      - name: Select Xcode
+      - id: toolchain
+        name: Select Xcode
         run: |
           set -euxo pipefail
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
@@ -42,13 +44,15 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
           swiftc --version
 
-      - name: Install XcodeGen
+      - id: xcodegen
+        name: Install XcodeGen
         run: |
           set -euxo pipefail
           brew install xcodegen
           xcodegen --version
 
-      - name: Validate source
+      - id: validate
+        name: Validate source
         working-directory: src
         run: |
           set -euxo pipefail
@@ -58,7 +62,8 @@ jobs:
           ruby -e 'require "yaml"; YAML.load_file("project.yml"); puts "project.yml: PASS"'
           bash -n build-unsigned.sh
 
-      - name: Generate project
+      - id: project
+        name: Generate project
         working-directory: src
         run: |
           set -euxo pipefail
@@ -66,7 +71,8 @@ jobs:
           xcodebuild -project Aspirine.xcodeproj -scheme Aspirine -showBuildSettings > build-settings.txt
           grep -E 'PRODUCT_BUNDLE_IDENTIFIER|IPHONEOS_DEPLOYMENT_TARGET|SWIFT_VERSION|TARGETED_DEVICE_FAMILY|MARKETING_VERSION|CURRENT_PROJECT_VERSION' build-settings.txt
 
-      - name: Debug device compile
+      - id: debugbuild
+        name: Debug device compile
         working-directory: src
         run: |
           set -euxo pipefail
@@ -82,7 +88,8 @@ jobs:
             CODE_SIGN_IDENTITY='' \
             build | tee xcodebuild-debug.log
 
-      - name: Static analyzer
+      - id: analyze
+        name: Static analyzer
         working-directory: src
         run: |
           set -euxo pipefail
@@ -98,7 +105,8 @@ jobs:
             CODE_SIGN_IDENTITY='' \
             analyze | tee xcodebuild-analyze.log
 
-      - name: Build unsigned IPA
+      - id: releasebuild
+        name: Build unsigned IPA
         working-directory: src
         run: |
           set -euxo pipefail
@@ -106,7 +114,8 @@ jobs:
           test -s Aspirine-unsigned.ipa
           shasum -a 256 Aspirine-unsigned.ipa | tee Aspirine-unsigned.ipa.sha256
 
-      - name: Inspect IPA
+      - id: inspect
+        name: Inspect IPA
         working-directory: src
         run: |
           set -euxo pipefail
@@ -132,7 +141,8 @@ jobs:
           test -z "$(find ipa-inspect -type f -name '*.mobileprovision' -print -quit)"
           shasum -a 256 -c Aspirine-unsigned.ipa.sha256
 
-      - name: Upload workflow artifact
+      - id: artifact
+        name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: Aspirine-Ultimate-2.2-RC-unsigned
@@ -142,7 +152,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish GitHub Release
+      - id: publish
+        name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -155,3 +166,37 @@ jobs:
           else
             gh release create "$TAG" src/Aspirine-unsigned.ipa src/Aspirine-unsigned.ipa.sha256 --title "$TITLE" --notes "$NOTES" --prerelease --target "$GITHUB_SHA"
           fi
+
+      - name: Write machine-readable build status
+        if: always()
+        env:
+          EXTRACT: ${{ steps.extract.outcome }}
+          TOOLCHAIN: ${{ steps.toolchain.outcome }}
+          XCODEGEN: ${{ steps.xcodegen.outcome }}
+          VALIDATE: ${{ steps.validate.outcome }}
+          PROJECT: ${{ steps.project.outcome }}
+          DEBUGBUILD: ${{ steps.debugbuild.outcome }}
+          ANALYZE: ${{ steps.analyze.outcome }}
+          RELEASEBUILD: ${{ steps.releasebuild.outcome }}
+          INSPECT: ${{ steps.inspect.outcome }}
+          ARTIFACT: ${{ steps.artifact.outcome }}
+          PUBLISH: ${{ steps.publish.outcome }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+          keys = ['EXTRACT','TOOLCHAIN','XCODEGEN','VALIDATE','PROJECT','DEBUGBUILD','ANALYZE','RELEASEBUILD','INSPECT','ARTIFACT','PUBLISH']
+          payload = {
+            'source_commit': os.environ.get('GITHUB_SHA',''),
+            'run_id': os.environ.get('GITHUB_RUN_ID',''),
+            'run_attempt': os.environ.get('GITHUB_RUN_ATTEMPT',''),
+            'steps': {k.lower(): os.environ.get(k,'') for k in keys},
+          }
+          pathlib.Path('.aspirine-build-status.json').write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .aspirine-build-status.json
+          git commit -m 'ci: record Aspirine build status [skip ci]' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
