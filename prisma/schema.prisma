@@ -1,0 +1,172 @@
+datasource db {
+  provider = env("DATABASE_PROVIDER")
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum IncomeSource {
+  SALARIO
+  FREELANCE
+  TRANSFERENCIA
+  REINTEGRO
+  OTROS
+}
+
+model User {
+  id         String         @id @default(cuid())
+  email      String         @unique
+  name       String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  incomes    Income[]
+  services   Service[]
+  purchases  Purchase[]
+  lists      ShoppingList[]
+  accounts   Account[]
+  sessions   Session[]
+}
+
+model Income {
+  id         String       @id @default(cuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  source     IncomeSource
+  amount     Decimal      @db.Decimal(18, 2)
+  currency   String       @default("ARS")
+  receivedAt DateTime
+  notes      String?
+  createdAt  DateTime     @default(now())
+}
+
+model Service {
+  id          String        @id @default(cuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  name        String
+  category    String
+  provider    String?
+  typicalDay  Int?
+  lastAmount  Decimal?      @db.Decimal(18, 2)
+  currency    String        @default("ARS")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  bills       ServiceBill[]
+}
+
+model ServiceBill {
+  id        String   @id @default(cuid())
+  serviceId String
+  service   Service  @relation(fields: [serviceId], references: [id])
+  period    String
+  dueDate   DateTime
+  amount    Decimal  @db.Decimal(18, 2)
+  paid      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  unit        String
+  defaultQty  Float?
+  brand       String?
+  createdAt   DateTime @default(now())
+  items       PurchaseItem[]
+  listItems   ShoppingListItem[]
+}
+
+model Purchase {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  store       String?
+  total       Decimal        @db.Decimal(18, 2)
+  currency    String         @default("ARS")
+  purchasedAt DateTime
+  items       PurchaseItem[]
+  createdAt   DateTime       @default(now())
+}
+
+model PurchaseItem {
+  id          String    @id @default(cuid())
+  purchaseId  String
+  purchase    Purchase @relation(fields: [purchaseId], references: [id])
+  productId   String?
+  product     Product? @relation(fields: [productId], references: [id])
+  name        String
+  category    String
+  quantity    Float
+  unit        String
+  unitPrice   Decimal   @db.Decimal(18, 2)
+}
+
+model ShoppingList {
+  id         String             @id @default(cuid())
+  userId     String
+  user       User               @relation(fields: [userId], references: [id])
+  title      String
+  createdAt  DateTime           @default(now())
+  items      ShoppingListItem[]
+  fromPrompt String?
+}
+
+model ShoppingListItem {
+  id             String            @id @default(cuid())
+  shoppingListId String
+  shoppingList   ShoppingList      @relation(fields: [shoppingListId], references: [id])
+  productId      String?
+  product        Product?          @relation(fields: [productId], references: [id])
+  name           String
+  category       String
+  quantity       Float
+  unit           String
+  suggestedPrice Decimal?          @db.Decimal(18, 2)
+  checked        Boolean           @default(false)
+}
+
+model ConsumptionAverage {
+  id          String  @id @default(cuid())
+  category    String
+  monthlyQty  Float
+  unit        String
+  notes       String?
+  source      String?
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
