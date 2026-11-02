@@ -23,6 +23,7 @@
 <script>
 // Render de compatibilidad: Canvas2D cuando WebGL está deshabilitado por el navegador.
 window.startFallback=function(){
+ if(window.__fallbackStarted)return;window.__fallbackStarted=true;
  const canvas=document.getElementById('scene'),ctx=canvas.getContext('2d'); if(!ctx){document.getElementById('error').style.display='flex';return;}
  const $=id=>document.getElementById(id);let t=0,last=performance.now(),pause=false,mode='twin',zoom=1,pan=0,panY=0;
  const r=(()=>{let n=9876;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296)})();
@@ -63,6 +64,7 @@ window.startFallback=function(){
  }
  requestAnimationFrame(draw);
 };
+setTimeout(()=>{if(!window.__twinStarted)window.startFallback()},7500);
 </script>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
@@ -72,7 +74,7 @@ const lerp=(a,b,t)=>a+(b-a)*t;
 const rng=(()=>{let s=1981;return ()=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296}})();
 const canvas=$('scene');let renderer;
 try{renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'high-performance'});}catch(e){window.startFallback();throw e}
-renderer.setPixelRatio(Math.min(devicePixelRatio,innerWidth<650?1.35:1.7));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;renderer.shadowMap.enabled=innerWidth>730;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.setPixelRatio(Math.min(devicePixelRatio,innerWidth<650?1.35:1.7));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;renderer.shadowMap.enabled=innerWidth>730;renderer.shadowMap.type=THREE.PCFSoftShadowMap;window.__twinStarted=true;
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a2423);scene.fog=new THREE.FogExp2(0x193a31,.026);
 const camera=new THREE.PerspectiveCamera(39,innerWidth/innerHeight,.08,220);const focus=new THREE.Vector3(0,1.9,0);let cameraMode='twin',yaw=.35,pitch=.31,dist=18,targetDist=18,clock=new THREE.Clock(),t=0,paused=false,brainVisible=true;
 const ambient=new THREE.HemisphereLight(0xcdfdeb,0x34491f,2.15);scene.add(ambient);
