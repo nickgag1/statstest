@@ -20,6 +20,50 @@
 <nav class="chrome bottom" aria-label="Controles de cámara"><button data-camera="twin" class="active">Mosca + cerebro</button><button data-camera="fly">Mosca</button><button data-camera="brain">Cerebro</button><button data-camera="world">Jardín</button></nav>
 <div class="chrome" id="feed">ARRASTRÁ PARA ROTAR · PELLIZCÁ PARA ACERCAR · TOCÁ LOS MODOS PARA CAMBIAR LA CÁMARA</div><div class="hint">RENDERIZADO WEBGL · MODO ADAPTATIVO</div>
 <div id="error"><div><strong>El motor 3D no pudo iniciarse</strong><p>Se necesita un navegador con WebGL y acceso a la biblioteca Three.js. Probá Chrome o Safari actualizado.</p><button onclick="location.reload()">Reintentar</button></div></div>
+<script>
+// Render de compatibilidad: Canvas2D cuando WebGL está deshabilitado por el navegador.
+window.startFallback=function(){
+ const canvas=document.getElementById('scene'),ctx=canvas.getContext('2d'); if(!ctx){document.getElementById('error').style.display='flex';return;}
+ const $=id=>document.getElementById(id);let t=0,last=performance.now(),pause=false,mode='twin',zoom=1,pan=0,panY=0;
+ const r=(()=>{let n=9876;return()=>((n=(Math.imul(n,1664525)+1013904223)>>>0)/4294967296)})();
+ const leaves=Array.from({length:120},()=>({x:r(),y:r(),s:r(),k:r()}));
+ const nodes=Array.from({length:1100},()=>{let a=r()*Math.PI*2,u=Math.sqrt(r());return{x:Math.cos(a)*u,y:Math.sin(a)*u,z:r(),s:r()*10}});
+ const resources=[{x:.26,y:.73,name:'Agua'},{x:.70,y:.75,name:'Fruta'}];
+ let energy=85,thirst=70,hunger=73;let fx=.36,fy=.53,angle=0;
+ function resize(){let d=Math.min(devicePixelRatio||1,1.6),w=canvas.clientWidth,h=canvas.clientHeight;canvas.width=Math.max(200,w*d);canvas.height=Math.max(200,h*d);ctx.setTransform(d,0,0,d,0,0)}
+ resize();addEventListener('resize',resize);
+ canvas.addEventListener('wheel',e=>{zoom=Math.min(2.5,Math.max(.65,zoom*(1-e.deltaY*.0005)));e.preventDefault()},{passive:false});
+ let down=false,px=0;canvas.addEventListener('pointerdown',e=>{down=true;px=e.clientX;canvas.setPointerCapture(e.pointerId)});canvas.addEventListener('pointerup',()=>down=false);canvas.addEventListener('pointermove',e=>{if(down){pan+=(e.clientX-px)*.003;px=e.clientX}});
+ document.querySelectorAll('[data-camera]').forEach(el=>el.addEventListener('click',()=>{mode=el.dataset.camera;document.querySelectorAll('[data-camera]').forEach(b=>b.classList.toggle('active',b===el))}));
+ $('pauseButton').addEventListener('click',()=>{pause=!pause;$('pauseButton').textContent=pause?'Reanudar':'Pausar'});
+ let brainShown=true;$('brainButton').addEventListener('click',()=>{brainShown=!brainShown;$('brainButton').textContent=brainShown?'Mostrar red':'Ocultar red'});
+ function ellipse(x,y,rx,ry,col,rot=0){ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.beginPath();ctx.ellipse(0,0,Math.max(.2,rx),Math.max(.2,ry),0,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();ctx.restore()}
+ function stroke(ax,ay,bx,by,color,width){ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke()}
+ function draw(now){requestAnimationFrame(draw);const dt=Math.min((now-last)/1000,.05);last=now;if(!pause){t+=dt;thirst=Math.max(0,thirst-dt*.12);hunger=Math.max(0,hunger-dt*.11);energy=Math.max(0,energy-dt*.06);fx=.38+Math.sin(t*.25)*.14;fy=.53+Math.cos(t*.31)*.07;angle=Math.sin(t*.31)*.1}
+ const w=canvas.clientWidth,h=canvas.clientHeight,cx=w*.49,cy=h*.53,world=zoom*Math.min(w/1100,h/780)*1.55;
+ ctx.clearRect(0,0,w,h);let g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,'#163d3d');g.addColorStop(.55,'#4a7563');g.addColorStop(1,'#102b25');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+ // Desenfoque ambiental y suelo.
+ for(const l of leaves){let x=l.x*w,y=l.y*h*.7;ellipse(x,y,12+l.s*30,14+l.k*15,`rgba(${l.k>.5?'185,255,187':'36,115,105'},.1)`,l.k*2)}
+ let baseY=cy+h*.12;ellipse(cx,baseY,w*.53*world,h*.37*world,'#254d3c');ellipse(cx,baseY,w*.4*world,h*.25*world,'#356c4c');
+ for(const loc of resources){let x=cx+(loc.x-.5)*w*.47*world,y=baseY+(loc.y-.7)*h*.55*world;ellipse(x,y,33*world,14*world,loc.name==='Agua'?'#66b8bf':'#cf9b49');ellipse(x-6*world,y-4*world,20*world,6*world,loc.name==='Agua'?'#b8ffff':'#f4cf75')}
+ for(let i=0;i<140;i++){const l=leaves[i%leaves.length],x=cx+(l.x-.5)*w*.88*world,y=baseY+(l.y-.5)*h*.43*world;stroke(x,y,x+(l.k-.5)*14*world,y-(8+l.s*22)*world,'#80a8799a',Math.max(.5,world*.8))}
+ const flyX=mode==='brain'?cx-w*.15:mode==='fly'?cx:cx-w*.13,flyY=mode==='world'?cy+h*.05:cy,scale=(mode==='fly'?1.6:mode==='world'?.6:1)*world;
+ // Mosca con alas de transparencia, ojos facetados y patas móviles.
+ ctx.save();ctx.translate(flyX,flyY+Math.sin(t*5)*2);ctx.rotate(angle);ellipse(0,90*scale,80*scale,13*scale,'#061b1966');
+ for(const side of [-1,1]){ellipse(-13*scale,-22*scale+side*42*scale,85*scale,24*scale,'#bdddc95c',side*.32+Math.sin(t*80)*.01);for(let i=0;i<3;i++){let ax=22*scale-i*24*scale,ay=23*scale;stroke(ax,ay,ax+(8-i*7)*scale,ay+30*scale, '#493524',2*scale);stroke(ax+(8-i*7)*scale,ay+30*scale,ax+(i-1)*35*scale,ay+65*scale,'#493524',1.8*scale)}}
+ ellipse(-46*scale,3*scale,60*scale,32*scale,'#ae8c54');for(let k=0;k<4;k++)ellipse((-20-k*17)*scale,3*scale,5*scale,29*scale,'#5c432b');ellipse(18*scale,-2*scale,43*scale,37*scale,'#92704f');ellipse(61*scale,-8*scale,29*scale,29*scale,'#c29a64');for(let side of [-1,1]){ellipse(77*scale,(-10+side*17)*scale,18*scale,16*scale,'#aa382a');for(let k=0;k<15;k++){let a=k*2.4;ellipse((77+Math.cos(a)*10)*scale,(-10+side*17+Math.sin(a)*9)*scale,1.6*scale,1.6*scale,'#ffb26a')}}stroke(81*scale,-30*scale,100*scale,-56*scale,'#493524',2*scale);
+ ctx.restore();
+ // Gráfico esquemático de actividad: DEMO, nunca presentado como MaleCNS en vivo.
+ if(brainShown){const bx=mode==='brain'?cx:mode==='fly'?cx+w*.23:cx+w*.24,by=mode==='world'?cy-h*.14:cy-h*.08,S=(mode==='brain'?1.5:mode==='world'?.6:1)*world;ctx.save();ctx.translate(bx,by);ctx.rotate(pan*.1);ctx.shadowColor='#5cdbbb';ctx.shadowBlur=19*S;ellipse(0,0,125*S,85*S,'#83ebb70b');ctx.shadowBlur=0;
+ for(let i=0;i<200;i++){const a=nodes[i],b=nodes[(i*17+19)%nodes.length];stroke(a.x*115*S,a.y*82*S,b.x*115*S,b.y*82*S,'#6acfb921',.5*S)}
+ for(let i=0;i<nodes.length;i++){const p=nodes[i],activity=Math.pow(Math.max(0,Math.sin(t*4+p.s*6)*Math.sin(t*.6+p.z*12)),6),hot=activity>.55;ellipse(p.x*115*S,p.y*82*S,1.0*S+activity*1.5*S,1.0*S+activity*1.5*S,hot?'#f8bf7f':activity>.12?'#9af3d1':'#4d94a5')}
+ ctx.restore();}
+ $('fps').textContent='CANVAS2D · MODO COMPATIBILIDAD';$('behavior').textContent='EXPLORANDO';$('neuralSource').textContent='SEÑAL ILUSTRATIVA';$('modeBadge').textContent='DEMOSTRACIÓN 3D / 2D';
+ for(const [name,v] of [['energy',energy],['thirst',thirst],['hunger',hunger]]){$(name+'Bar').style.width=v+'%';$(name+'Value').textContent=Math.round(v)+'%'}
+ }
+ requestAnimationFrame(draw);
+};
+</script>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
 const $=id=>document.getElementById(id);
@@ -27,7 +71,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const lerp=(a,b,t)=>a+(b-a)*t;
 const rng=(()=>{let s=1981;return ()=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296}})();
 const canvas=$('scene');let renderer;
-try{renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'high-performance'});}catch(e){$('error').style.display='flex';throw e}
+try{renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'high-performance'});}catch(e){window.startFallback();throw e}
 renderer.setPixelRatio(Math.min(devicePixelRatio,innerWidth<650?1.35:1.7));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;renderer.shadowMap.enabled=innerWidth>730;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a2423);scene.fog=new THREE.FogExp2(0x193a31,.026);
 const camera=new THREE.PerspectiveCamera(39,innerWidth/innerHeight,.08,220);const focus=new THREE.Vector3(0,1.9,0);let cameraMode='twin',yaw=.35,pitch=.31,dist=18,targetDist=18,clock=new THREE.Clock(),t=0,paused=false,brainVisible=true;
